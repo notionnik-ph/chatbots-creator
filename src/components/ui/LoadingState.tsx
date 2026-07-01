@@ -1,0 +1,1 @@
+export default function LoadingState({ label = 'Loading…' }: { label?: string }) { return <div className="min-h-[240px] grid place-items-center text-sm text-text-muted"><span className="inline-flex items-center gap-2"><span className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />{label}</span></div>; }
