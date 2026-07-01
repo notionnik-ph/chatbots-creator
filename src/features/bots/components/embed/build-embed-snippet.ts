@@ -1,11 +1,17 @@
 import type { Bot } from "@/features/bots/types/bot";
 
 export function getEmbedBaseUrl(browserOrigin?: string) {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "") ||
-    browserOrigin?.replace(/\/+$/, "") ||
-    "http://localhost:3000"
-  );
+  const rawUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    browserOrigin?.trim().replace(/\/+$/, "") ||
+    "http://localhost:3000";
+
+  // Production embeds must always use HTTPS.
+  if (!rawUrl.includes("localhost")) {
+    return rawUrl.replace(/^http:\/\//i, "https://");
+  }
+
+  return rawUrl;
 }
 
 function escapeHtmlAttribute(value: string) {
@@ -29,8 +35,8 @@ export function buildEmbedSnippet(
   const baseUrl = getEmbedBaseUrl(browserOrigin);
   const widgetUrl = `${baseUrl}/widget/${encodeURIComponent(bot.refId)}`;
 
-  const safeRefId = escapeHtmlAttribute(bot.refId);
   const safeWidgetUrl = escapeHtmlAttribute(widgetUrl);
+  const safeRefId = escapeHtmlAttribute(bot.refId);
   const safeTitle = escapeHtmlAttribute(
     `${bot.name || "Chatbot"} AI Assistant`,
   );
@@ -41,7 +47,7 @@ export function buildEmbedSnippet(
   title="${safeTitle}"
   width="100%"
   height="720"
-  loading="lazy"
+  loading="eager"
   allow="clipboard-read; clipboard-write"
   style="display:block;width:100%;height:720px;min-height:560px;border:0;border-radius:16px;background:#111118;overflow:hidden"
 ></iframe>`;
