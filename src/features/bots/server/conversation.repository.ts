@@ -16,9 +16,21 @@ function mapRow(row: Record<string, unknown>): ConversationLog {
   };
 }
 
-export async function findCachedReply(botRefId: string, normalizedMessage: string) {
-  const { data, error } = await supabaseAdmin.from(TABLE).select('bot_response').eq('bot_ref_id', botRefId).eq('normalized_message', normalizedMessage).order('created_at', { ascending: false }).limit(1).maybeSingle();
-  if (error) throw new Error(error.message);
+export async function findCachedReply(botRefId: string, normalizedMessage: string, knowledgeHash: string ) {
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("bot_response")
+    .eq("bot_ref_id", botRefId)
+    .eq("normalized_message", normalizedMessage)
+    .eq("knowledge_hash", knowledgeHash)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
   return data?.bot_response ?? null;
 }
 

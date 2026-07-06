@@ -61,7 +61,7 @@ export const env = {
     return process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
   },
   get geminiFallbackModel() {
-    return process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.0-flash";
+    return process.env.GEMINI_FALLBACK_MODEL ?? "gemini-2.5-flash";
   },
   get adminEmails() {
     return (process.env.ADMIN_EMAILS ?? "")
