@@ -19,6 +19,7 @@ import { routeQuestionToKnowledgeChunks } from "./knowledge/knowledge-router.ser
 
 import { normalizeQuestion } from "./question-normalizer";
 import { syncOriginalChunksForBot } from "./knowledge/knowledge-chunk-index.service";
+import { canOwnerUseAiTokens } from "@/features/billing/server/billing.service";
 
 console.log("[SERVICE] conversation.service.ts loaded");
 
@@ -113,10 +114,7 @@ export async function replyToPublicMessage(
    * Exact duplicate saved conversation answer.
    * No Groq call needed.
    */
-  console.log(
-    "[SERVICE] replyToPublicMessage normalized message:",
-    normalized,
-  );
+  console.log("[SERVICE] replyToPublicMessage normalized message:", normalized);
 
   console.log(
     "[SERVICE] replyToPublicMessage checking cache for botRef:",
@@ -125,24 +123,19 @@ export async function replyToPublicMessage(
     normalized,
   );
 
-  const cached = await findCachedReply(
-    botRef,
-    normalized,
-    knowledgeHash,
-  ).catch((error) => {
-    console.error(
-      "[SERVICE] replyToPublicMessage conversation cache lookup failed:",
-      error,
-    );
+  const cached = await findCachedReply(botRef, normalized, knowledgeHash).catch(
+    (error) => {
+      console.error(
+        "[SERVICE] replyToPublicMessage conversation cache lookup failed:",
+        error,
+      );
 
-    return null;
-  });
+      return null;
+    },
+  );
 
   if (cached) {
-    console.log(
-      "[SERVICE] replyToPublicMessage cache HIT for botRef:",
-      botRef,
-    );
+    console.log("[SERVICE] replyToPublicMessage cache HIT for botRef:", botRef);
 
     return {
       kind: "success" as const,
@@ -151,10 +144,31 @@ export async function replyToPublicMessage(
     };
   }
 
-  console.log(
-    "[SERVICE] replyToPublicMessage cache MISS for botRef:",
-    botRef,
-  );
+  console.log("[SERVICE] replyToPublicMessage cache MISS for botRef:", botRef);
+
+  const tokenGate = await canOwnerUseAiTokens(bot.owner_id).catch((error) => {
+    console.error(
+      "[SERVICE] replyToPublicMessage token usage check failed:",
+      error,
+    );
+
+    return null;
+  });
+
+  if (tokenGate && !tokenGate.allowed) {
+    console.warn("[SERVICE] replyToPublicMessage token limit reached:", {
+      ownerId: bot.owner_id,
+      monthlyTokensUsed: tokenGate.summary.monthlyTokensUsed,
+      monthlyTokenLimit: tokenGate.summary.profile.monthlyTokenLimit,
+    });
+
+    return {
+      kind: "success" as const,
+      reply:
+        "This chatbot has reached its monthly token limit. Please contact the site owner or try again after the billing period resets.",
+      cached: false,
+    };
+  }
 
   /*
    * PRIORITY 3:
@@ -168,90 +182,87 @@ export async function replyToPublicMessage(
   );
 
   let candidates = await findKnowledgeChunkCandidates({
-  botId: bot.id,
-  knowledgeHash,
-  question: message,
-  limit: 12,
-}).catch((error) => {
-  console.error(
-    "[SERVICE] replyToPublicMessage knowledge candidate lookup failed:",
-    error,
-  );
-
-  return [];
-});
-
-/*
- * Self-healing for bots created before the new searchable-index feature.
- * It uses the SAME existing original kb_chunks.
- * It does not remove, replace, or re-chunk your knowledge base.
- */
-if (!candidates.length) {
-  console.warn(
-    "[SERVICE] replyToPublicMessage no indexed candidates; attempting automatic original chunk index rebuild",
-  );
-
-  const serializedKbChunks = JSON.stringify(bot.kb_chunks ?? null) ?? "";
-  
-  console.log(
-  "[SERVICE] replyToPublicMessage index repair source check:",
-  {
     botId: bot.id,
-    kbChunksType: Array.isArray(bot.kb_chunks)
-      ? "array"
-      : typeof bot.kb_chunks,
-    hasKbChunks: Boolean(bot.kb_chunks),
-    kbChunksLength: serializedKbChunks.length,
-  },
-);
-
-  const indexRepair = await syncOriginalChunksForBot({
-    id: bot.id,
-    knowledge_base: bot.knowledge_base,
-    kb_chunks: bot.kb_chunks,
+    knowledgeHash,
+    question: message,
+    limit: 12,
   }).catch((error) => {
     console.error(
-      "[SERVICE] replyToPublicMessage automatic index rebuild failed:",
+      "[SERVICE] replyToPublicMessage knowledge candidate lookup failed:",
       error,
     );
 
-    return null;
+    return [];
   });
 
-  console.log(
-    "[SERVICE] replyToPublicMessage automatic index rebuild result:",
-    indexRepair,
-  );
+  /*
+   * Self-healing for bots created before the new searchable-index feature.
+   * It uses the SAME existing original kb_chunks.
+   * It does not remove, replace, or re-chunk your knowledge base.
+   */
+  if (!candidates.length) {
+    console.warn(
+      "[SERVICE] replyToPublicMessage no indexed candidates; attempting automatic original chunk index rebuild",
+    );
 
-  if (indexRepair?.indexed) {
-    candidates = await findKnowledgeChunkCandidates({
+    const serializedKbChunks = JSON.stringify(bot.kb_chunks ?? null) ?? "";
+
+    console.log("[SERVICE] replyToPublicMessage index repair source check:", {
       botId: bot.id,
-      knowledgeHash,
-      question: message,
-      limit: 12,
+      kbChunksType: Array.isArray(bot.kb_chunks)
+        ? "array"
+        : typeof bot.kb_chunks,
+      hasKbChunks: Boolean(bot.kb_chunks),
+      kbChunksLength: serializedKbChunks.length,
+    });
+
+    const indexRepair = await syncOriginalChunksForBot({
+      id: bot.id,
+      knowledge_base: bot.knowledge_base,
+      kb_chunks: bot.kb_chunks,
     }).catch((error) => {
       console.error(
-        "[SERVICE] replyToPublicMessage candidate retry after index rebuild failed:",
+        "[SERVICE] replyToPublicMessage automatic index rebuild failed:",
         error,
       );
 
-      return [];
+      return null;
     });
-  }
-}
 
-console.log(
-  "[SERVICE] replyToPublicMessage knowledge candidate prefilter complete:",
-  {
-    candidateCount: candidates.length,
-    candidates: candidates.map((candidate) => ({
-      chunkId: candidate.chunkId,
-      path: candidate.path,
-      label: candidate.label,
-      score: candidate.score,
-    })),
-  },
-);
+    console.log(
+      "[SERVICE] replyToPublicMessage automatic index rebuild result:",
+      indexRepair,
+    );
+
+    if (indexRepair?.indexed) {
+      candidates = await findKnowledgeChunkCandidates({
+        botId: bot.id,
+        knowledgeHash,
+        question: message,
+        limit: 12,
+      }).catch((error) => {
+        console.error(
+          "[SERVICE] replyToPublicMessage candidate retry after index rebuild failed:",
+          error,
+        );
+
+        return [];
+      });
+    }
+  }
+
+  console.log(
+    "[SERVICE] replyToPublicMessage knowledge candidate prefilter complete:",
+    {
+      candidateCount: candidates.length,
+      candidates: candidates.map((candidate) => ({
+        chunkId: candidate.chunkId,
+        path: candidate.path,
+        label: candidate.label,
+        score: candidate.score,
+      })),
+    },
+  );
 
   if (!candidates.length) {
     console.log(

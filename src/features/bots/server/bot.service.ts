@@ -8,6 +8,11 @@ import { invalidateBotKnowledgeCache } from "./knowledge/cache.service";
 import { chunkBotKnowledge } from "./knowledge/chunker.service";
 import { generateGeneratedFaqsForBot } from "./knowledge/faq-generation.service";
 import { syncOriginalChunksForBot } from "./knowledge/knowledge-chunk-index.service";
+import { enforceActiveBotLimit } from "@/features/billing/server/billing.service";
+import {
+  assertCanActivateBot,
+  assertCanCreateBot,
+} from "@/features/billing/server/billing.service";
 
 console.log("[SERVICE] bot.service.ts loaded");
 
@@ -186,10 +191,7 @@ async function runPostChunkingTasks(input: {
     faqGeneration = {
       generated: false,
       count: 0,
-      reason:
-        error instanceof Error
-          ? error.message
-          : "FAQ generation failed",
+      reason: error instanceof Error ? error.message : "FAQ generation failed",
     };
   }
 
@@ -240,20 +242,27 @@ export async function getBotForOwner(botRef: string, ownerId: string) {
   return result;
 }
 
-export async function createBotForOwner(
-  ownerId: string,
-  input: BotFormData,
-) {
+export async function createBotForOwner(ownerId: string, input: BotFormData) {
   console.log("[SERVICE] createBotForOwner called with:", {
     ownerId,
     input,
   });
+  await assertCanCreateBot(ownerId);
 
   const row = await repository.createBotRow(createPayload(ownerId, input));
 
   console.log("[SERVICE] createBotForOwner bot created in DB:", {
     botId: row.id,
     refId: row.ref_id,
+  });
+
+  const activeBotLimit = await enforceActiveBotLimit({
+    ownerId,
+    keepBotRef: row.ref_id,
+  });
+
+  console.log("[SERVICE] createBotForOwner active bot limit result:", {
+    activeBotLimit,
   });
 
   let chunking: {
@@ -315,14 +324,14 @@ export async function createBotForOwner(
     }
   }
 
-  const latest =
-    (await repository.findBotForOwner(row.ref_id, ownerId)) ?? row;
+  const latest = (await repository.findBotForOwner(row.ref_id, ownerId)) ?? row;
 
   return {
     bot: mapBotRow(latest),
     chunking,
     knowledgeIndex,
     faqGeneration,
+    activeBotLimit,
   };
 }
 
@@ -336,6 +345,13 @@ export async function updateBotForOwner(
     ownerId,
     input,
   });
+
+  if (input.status === "active") {
+    await assertCanActivateBot({
+      ownerId,
+      botRef,
+    });
+  }
 
   const row = await repository.updateBotForOwner(
     botRef,
@@ -424,8 +440,7 @@ export async function updateBotForOwner(
     }
   }
 
-  const latest =
-    (await repository.findBotForOwner(botRef, ownerId)) ?? row;
+  const latest = (await repository.findBotForOwner(botRef, ownerId)) ?? row;
 
   return {
     bot: mapBotRow(latest),
@@ -451,10 +466,7 @@ export async function deleteBotForOwner(botRef: string, ownerId: string) {
   return result;
 }
 
-export async function chunkKnowledgeForOwner(
-  botRef: string,
-  ownerId: string,
-) {
+export async function chunkKnowledgeForOwner(botRef: string, ownerId: string) {
   console.log("[SERVICE] chunkKnowledgeForOwner called with:", {
     botRef,
     ownerId,
@@ -473,10 +485,7 @@ export async function chunkKnowledgeForOwner(
 
   const chunking = await chunkBotKnowledge(row);
 
-  console.log(
-    "[SERVICE] chunkKnowledgeForOwner chunking result:",
-    chunking,
-  );
+  console.log("[SERVICE] chunkKnowledgeForOwner chunking result:", chunking);
 
   await invalidateBotKnowledgeCache(botRef);
 

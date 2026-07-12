@@ -7,10 +7,13 @@ import Button from "@/components/ui/Button";
 import type { BotFormData } from "@/features/bots/types/bot-config";
 import { defaultBotFormData } from "@/features/bots/types/bot-config";
 import BotBrandingFields from "../edit/BotBrandingFields";
-import BotGeneralFields, { type BotFieldUpdater } from "../edit/BotGeneralFields";
+import BotGeneralFields, {
+  type BotFieldUpdater,
+} from "../edit/BotGeneralFields";
 import BotKnowledgeFields from "../edit/BotKnowledgeFields";
 import BotPreview from "../preview/BotPreview";
 import { useAuth } from "@/features/auth/components/AuthProvider";
+import BillingLimitModal from "@/features/billing/components/BillingLimitModal";
 
 const steps = [
   { label: "General", description: "Identity & destination" },
@@ -26,6 +29,7 @@ export default function BotCreateWizard() {
   const [form, setForm] = useState<BotFormData>(defaultBotFormData);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [billingLimitMessage, setBillingLimitMessage] = useState("");
 
   const update: BotFieldUpdater = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -34,7 +38,9 @@ export default function BotCreateWizard() {
   const valid = step !== 0 || Boolean(form.name.trim());
 
   async function create() {
-    if (!session?.access_token) throw new Error("Your session has expired. Please sign in again.");
+    if (!session?.access_token) {
+      throw new Error("Your session has expired. Please sign in again.");
+    }
 
     const response = await fetch("/api/v1/me/bots", {
       method: "POST",
@@ -44,10 +50,40 @@ export default function BotCreateWizard() {
       },
       body: JSON.stringify(form),
     });
-    const body = await response.json();
 
-    if (!response.ok) throw new Error(body.error || "Unable to create bot");
-    router.replace(`/dashboard/bots/${body.data.bot.refId}`);
+    const body = (await response.json()) as {
+      data?: {
+        bot?: {
+          refId?: string;
+        };
+      };
+      error?: string;
+      code?: string;
+    };
+
+    if (!response.ok) {
+      if (
+        body.code === "BOT_LIMIT_REACHED" ||
+        body.code === "ACTIVE_BOT_LIMIT_REACHED"
+      ) {
+        setBillingLimitMessage(
+          body.error ||
+            "Your free plan allows only 1 chatbot. Upgrade to create more bots.",
+        );
+
+        return;
+      }
+
+      throw new Error(body.error || "Unable to create bot");
+    }
+
+    const botRef = body.data?.bot?.refId;
+
+    if (!botRef) {
+      throw new Error("Bot was created, but the bot reference was missing.");
+    }
+
+    router.replace(`/dashboard/bots/${botRef}`);
   }
 
   function continueToNextStep() {
@@ -62,14 +98,22 @@ export default function BotCreateWizard() {
 
   return (
     <div className="mx-auto max-w-7xl p-6 sm:p-8">
+      <BillingLimitModal
+        open={Boolean(billingLimitMessage)}
+        message={billingLimitMessage}
+        onClose={() => setBillingLimitMessage("")}
+      />
       <header className="mb-10">
         <p className="mb-2 flex items-center gap-2 text-sm font-medium text-primary">
           <Sparkles size={16} />
           New chatbot
         </p>
-        <h1 className="text-3xl font-bold text-text-primary">Create your AI assistant</h1>
+        <h1 className="text-3xl font-bold text-text-primary">
+          Create your AI assistant
+        </h1>
         <p className="mt-2 max-w-2xl text-text-secondary">
-          Add the business context and visual style that make this chatbot feel like part of your website.
+          Add the business context and visual style that make this chatbot feel
+          like part of your website.
         </p>
       </header>
 
@@ -79,14 +123,25 @@ export default function BotCreateWizard() {
           const complete = index < step;
 
           return (
-            <li key={item.label} className={`rounded-xl border p-3 transition-all ${active ? "border-primary/40 bg-primary/10" : complete ? "border-primary/20 bg-primary/5" : "border-border bg-surface"}`}>
+            <li
+              key={item.label}
+              className={`rounded-xl border p-3 transition-all ${active ? "border-primary/40 bg-primary/10" : complete ? "border-primary/20 bg-primary/5" : "border-border bg-surface"}`}
+            >
               <div className="flex items-center gap-2">
-                <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${active ? "bg-primary text-white" : complete ? "bg-primary/20 text-primary" : "bg-surface-elevated text-text-muted"}`}>
+                <span
+                  className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${active ? "bg-primary text-white" : complete ? "bg-primary/20 text-primary" : "bg-surface-elevated text-text-muted"}`}
+                >
                   {complete ? <Check size={14} /> : index + 1}
                 </span>
-                <span className={`text-sm font-semibold ${active ? "text-text-primary" : "text-text-secondary"}`}>{item.label}</span>
+                <span
+                  className={`text-sm font-semibold ${active ? "text-text-primary" : "text-text-secondary"}`}
+                >
+                  {item.label}
+                </span>
               </div>
-              <p className="mt-1 hidden text-xs text-text-muted sm:block">{item.description}</p>
+              <p className="mt-1 hidden text-xs text-text-muted sm:block">
+                {item.description}
+              </p>
             </li>
           );
         })}
@@ -104,9 +159,12 @@ export default function BotCreateWizard() {
                   <Bot size={20} />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold text-text-primary">Ready to create {form.name || "your chatbot"}</h2>
+                  <h2 className="text-lg font-semibold text-text-primary">
+                    Ready to create {form.name || "your chatbot"}
+                  </h2>
                   <p className="mt-1 text-sm leading-relaxed text-text-muted">
-                    Your chatbot will be created as active. You can edit its knowledge base, colors, and embed settings any time.
+                    Your chatbot will be created as active. You can edit its
+                    knowledge base, colors, and embed settings any time.
                   </p>
                 </div>
               </div>
@@ -115,12 +173,25 @@ export default function BotCreateWizard() {
                 {[
                   ["Name", form.name || "Not set"],
                   ["Website", form.websiteUrl || "Not set"],
-                  ["Knowledge base", `${form.knowledgeBase.length.toLocaleString()} characters`],
-                  ["Widget position", form.position === "bottom-left" ? "Bottom left" : "Bottom right"],
+                  [
+                    "Knowledge base",
+                    `${form.knowledgeBase.length.toLocaleString()} characters`,
+                  ],
+                  [
+                    "Widget position",
+                    form.position === "bottom-left"
+                      ? "Bottom left"
+                      : "Bottom right",
+                  ],
                 ].map(([label, value]) => (
-                  <div key={label} className="flex flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div
+                    key={label}
+                    className="flex flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  >
                     <dt className="text-text-muted">{label}</dt>
-                    <dd className="break-all font-medium text-text-primary">{value}</dd>
+                    <dd className="break-all font-medium text-text-primary">
+                      {value}
+                    </dd>
                   </div>
                 ))}
               </dl>
@@ -134,7 +205,12 @@ export default function BotCreateWizard() {
           )}
 
           <div className="mt-8 flex items-center justify-between gap-3 border-t border-border pt-6">
-            <Button type="button" variant="secondary" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setStep((current) => Math.max(0, current - 1))}
+              disabled={step === 0}
+            >
               <ArrowLeft size={16} />
               Back
             </Button>
@@ -154,7 +230,11 @@ export default function BotCreateWizard() {
                   try {
                     await create();
                   } catch (reason) {
-                    setError(reason instanceof Error ? reason.message : "Unable to create bot");
+                    setError(
+                      reason instanceof Error
+                        ? reason.message
+                        : "Unable to create bot",
+                    );
                   } finally {
                     setSaving(false);
                   }
@@ -174,7 +254,8 @@ export default function BotCreateWizard() {
           </div>
           <BotPreview config={form} />
           <p className="mt-3 text-xs leading-relaxed text-text-muted">
-            This preview reflects your selected colors, bot name, icon, and welcome message.
+            This preview reflects your selected colors, bot name, icon, and
+            welcome message.
           </p>
         </aside>
       </div>
