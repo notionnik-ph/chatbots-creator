@@ -12,8 +12,10 @@ export interface BillingProfile {
 export interface BillingSummary {
   profile: BillingProfile;
   activeBotCount: number;
+  createdBotCount: number;
   monthlyTokensUsed: number;
   monthlyTokensRemaining: number;
   botLimitReached: boolean;
+  botCreationLimitReached: boolean;
   tokenLimitReached: boolean;
 }

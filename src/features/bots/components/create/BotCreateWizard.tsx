@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Bot, Check, Sparkles } from "lucide-react";
 import Button from "@/components/ui/Button";
@@ -14,6 +14,7 @@ import BotKnowledgeFields from "../edit/BotKnowledgeFields";
 import BotPreview from "../preview/BotPreview";
 import { useAuth } from "@/features/auth/components/AuthProvider";
 import BillingLimitModal from "@/features/billing/components/BillingLimitModal";
+import type { BillingSummary } from "@/features/billing/types/billing";
 
 const steps = [
   { label: "General", description: "Identity & destination" },
@@ -30,14 +31,85 @@ export default function BotCreateWizard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [billingLimitMessage, setBillingLimitMessage] = useState("");
+  const [checkingBilling, setCheckingBilling] = useState(true);
+  const [createBlocked, setCreateBlocked] = useState(false);
 
   const update: BotFieldUpdater = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
+  useEffect(() => {
+    let active = true;
+
+    async function checkBillingLimit() {
+      console.log("[COMPONENT] BotCreateWizard checkBillingLimit called");
+
+      if (!session?.access_token) {
+        setCheckingBilling(false);
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/v1/me/billing", {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const payload = (await response.json()) as {
+          data?: BillingSummary;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error || "Failed to check billing limit");
+        }
+
+        const summary = payload.data;
+
+        if (
+          summary &&
+          summary.profile.plan !== "paid" &&
+          summary.botCreationLimitReached
+        ) {
+          const message =
+            "Your free plan allows only 1 chatbot. Upgrade to create more bots.";
+
+          if (active) {
+            setCreateBlocked(true);
+            setBillingLimitMessage(message);
+          }
+        }
+      } catch (error) {
+        console.error(
+          "[COMPONENT] BotCreateWizard checkBillingLimit failed:",
+          error,
+        );
+      } finally {
+        if (active) {
+          setCheckingBilling(false);
+        }
+      }
+    }
+
+    void checkBillingLimit();
+
+    return () => {
+      active = false;
+    };
+  }, [session?.access_token]);
+
   const valid = step !== 0 || Boolean(form.name.trim());
 
   async function create() {
+    if (createBlocked) {
+      setBillingLimitMessage(
+        "Your free plan allows only 1 chatbot. Upgrade to create more bots.",
+      );
+      return;
+    }
+
     if (!session?.access_token) {
       throw new Error("Your session has expired. Please sign in again.");
     }
@@ -64,8 +136,10 @@ export default function BotCreateWizard() {
     if (!response.ok) {
       if (
         body.code === "BOT_LIMIT_REACHED" ||
-        body.code === "ACTIVE_BOT_LIMIT_REACHED"
+        body.code === "ACTIVE_BOT_LIMIT_REACHED" ||
+        body.code === "BILLING_LIMIT_REACHED"
       ) {
+        setCreateBlocked(true);
         setBillingLimitMessage(
           body.error ||
             "Your free plan allows only 1 chatbot. Upgrade to create more bots.",
@@ -94,6 +168,48 @@ export default function BotCreateWizard() {
 
     setError("");
     setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
+  if (!checkingBilling && createBlocked) {
+    return (
+      <>
+        <BillingLimitModal
+          open={Boolean(billingLimitMessage)}
+          message={billingLimitMessage}
+          onClose={() => setBillingLimitMessage("")}
+        />
+
+        <div className="rounded-3xl border border-border bg-card p-8 shadow-card">
+          <h1 className="text-2xl font-semibold text-text-primary">
+            Free plan limit reached
+          </h1>
+
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-muted">
+            Your free plan currently allows only 1 chatbot. You already have a
+            chatbot in your account, so creating another one is disabled for
+            now.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              className="btn-primary px-5 py-2"
+              onClick={() => router.push("/dashboard/billing")}
+            >
+              View billing
+            </button>
+
+            <button
+              type="button"
+              className="btn-secondary px-5 py-2"
+              onClick={() => router.push("/dashboard/bots")}
+            >
+              Back to bots
+            </button>
+          </div>
+        </div>
+      </>
+    );
   }
 
   return (

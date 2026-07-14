@@ -10,6 +10,7 @@ import {
   createBotForOwner,
   listBotsForOwner,
 } from "@/features/bots/server/bot.service";
+import { getBillingLimitHttpResponse } from "@/features/billing/server/billing-http";
 
 console.log("[API] /api/v1/me/bots route loaded");
 
@@ -50,6 +51,14 @@ export async function POST(request: NextRequest) {
     return success(result, { status: 201 });
   } catch (error) {
     console.error("[API] POST /api/v1/me/bots error:", error);
+
+    const billingLimit = getBillingLimitHttpResponse(error);
+
+    if (billingLimit) {
+      return Response.json(billingLimit.body, {
+        status: billingLimit.status,
+      });
+    }
     if (error instanceof BotValidationError) {
       console.log(
         "[API] POST /api/v1/me/bots validation error:",

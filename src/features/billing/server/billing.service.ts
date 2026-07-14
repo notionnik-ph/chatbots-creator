@@ -8,9 +8,9 @@ import {
 
 import {
   countActiveBotsByOwner,
-  pauseOlderActiveBotsForOwner,
   countBotsByOwner,
   countOtherActiveBotsByOwner,
+  pauseOlderActiveBotsForOwner,
 } from "@/features/bots/server/bot.repository";
 
 console.log("[SERVICE] billing.service.ts loaded");
@@ -44,14 +44,16 @@ export async function getBillingSummary(
 
   const profile = await getOrCreateBillingProfile(userId);
 
-  const [activeBotCount, monthlyTokensUsed] = await Promise.all([
-    countActiveBotsByOwner(userId),
-    getTokenUsageForPeriod({
-      userId,
-      periodStart: profile.billingPeriodStart,
-      periodEnd: profile.billingPeriodEnd,
-    }),
-  ]);
+  const [activeBotCount, createdBotCount, monthlyTokensUsed] =
+    await Promise.all([
+      countActiveBotsByOwner(userId),
+      countBotsByOwner(userId),
+      getTokenUsageForPeriod({
+        userId,
+        periodStart: profile.billingPeriodStart,
+        periodEnd: profile.billingPeriodEnd,
+      }),
+    ]);
 
   const monthlyTokensRemaining = Math.max(
     profile.monthlyTokenLimit - monthlyTokensUsed,
@@ -61,9 +63,12 @@ export async function getBillingSummary(
   return {
     profile,
     activeBotCount,
+    createdBotCount,
     monthlyTokensUsed,
     monthlyTokensRemaining,
     botLimitReached: activeBotCount >= profile.botLimit,
+    botCreationLimitReached:
+      profile.plan !== "paid" && createdBotCount >= profile.botLimit,
     tokenLimitReached: monthlyTokensUsed >= profile.monthlyTokenLimit,
   };
 }

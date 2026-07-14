@@ -68,7 +68,7 @@ export async function createDefaultBillingProfile(
       user_id: userId,
       plan: "free",
       bot_limit: 1,
-      monthly_token_limit: 100000,
+      monthly_token_limit: 200000,
     })
     .select(
       `

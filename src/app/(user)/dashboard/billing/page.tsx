@@ -143,7 +143,7 @@ export default function BillingPage() {
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-muted">
-              Free plan includes 1 chatbot and 100,000 monthly AI tokens.
+              Free plan includes 1 chatbot and 200,000 monthly AI tokens.
             </p>
           </div>
 
@@ -242,7 +242,7 @@ export default function BillingPage() {
           <ul className="mt-6 space-y-3 text-sm text-text-secondary">
             {[
               "1 chatbot only",
-              "100,000 monthly AI tokens",
+              "200,000 monthly AI tokens",
               "Website embed widget",
               "Generated FAQ matching",
               "Conversation cache",
